@@ -19,7 +19,7 @@ jobs:
     
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     
     steps:
       - name: Checkout code
@@ -33,19 +33,21 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-      
+
+      # Linux build (AppImage)
       - name: Build for Linux
         if: matrix.os == 'ubuntu-latest'
         run: npm run build:linux
-      
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      # Windows build (portable only)
       - name: Build for Windows
         if: matrix.os == 'windows-latest'
         run: npm run build:win
-      
-      - name: Build for macOS
-        if: matrix.os == 'macos-latest'
-        run: npm run build:mac
-      
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -53,10 +55,6 @@ jobs:
           path: |
             release/**/*.exe
             release/**/*.AppImage
-            release/**/*.deb
-            release/**/*.rpm
-            release/**/*.dmg
-            release/**/*.zip
           retention-days: 30
 
   release:
