@@ -1,0 +1,305 @@
+import { app, BrowserWindow, ipcMain } from 'electron'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { initDatabase, loadConfig, saveConfig } from './database'
+import { executeQuery, executeQueryFirst, executeRun } from './db-helpers'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Set to production for releases
+process.env.NODE_ENV = process.env.NODE_ENV || 'development'
+
+const isDev = process.env.NODE_ENV === 'development'
+
+let mainWindow: BrowserWindow | null = null
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    show: false,
+    icon: path.join(__dirname, '../build/icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false // Needed for better-sqlite3
+    }
+  })
+
+  // Load the app
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173')
+    mainWindow.webContents.openDevTools()
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  }
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show()
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+// App lifecycle
+app.whenReady().then(async () => {
+  // Initialize database
+  await initDatabase(app.getPath('userData'))
+  
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    }
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
+
+// IPC Handlers for database operations
+
+// Tournament operations
+ipcMain.handle('tournament:getAll', async () => {
+  const db = getDb()
+  return db.prepare('SELECT * FROM tournaments ORDER BY date DESC').all()
+})
+
+ipcMain.handle('tournament:getActive', async () => {
+  const db = getDb()
+  return db.prepare('SELECT * FROM tournaments WHERE active = 1').get()
+})
+
+ipcMain.handle('tournament:create', async (_event, name: string) => {
+  const db = getDb()
+  const result = db.prepare(
+    'INSERT INTO tournaments (name, date, active) VALUES (?, datetime("now"), 0)'
+  ).run(name)
+  return { id: result.lastInsertRowid }
+})
+
+ipcMain.handle('tournament:setActive', async (_event, id: number) => {
+  const db = getDb()
+  db.prepare('UPDATE tournaments SET active = 0').run()
+  db.prepare('UPDATE tournaments SET active = 1 WHERE id = ?').run(id)
+  return { success: true }
+})
+
+ipcMain.handle('tournament:delete', async (_event, id: number) => {
+  const db = getDb()
+  // Delete related data first
+  db.prepare('DELETE FROM games WHERE whitePlayerId IN (SELECT id FROM players WHERE tournamentId = ?)').run(id)
+  db.prepare('DELETE FROM players WHERE tournamentId = ?').run(id)
+  db.prepare('DELETE FROM tournaments WHERE id = ?').run(id)
+  return { success: true }
+})
+
+// Player operations
+ipcMain.handle('player:getAll', async (_event, tournamentId: number) => {
+  const db = getDb()
+  return db.prepare('SELECT * FROM players WHERE tournamentId = ? ORDER BY surname, name').all(tournamentId)
+})
+
+ipcMain.handle('player:create', async (_event, player: { surname: string; name: string; sex: string; tournamentId: number }) => {
+  const db = getDb()
+  const result = db.prepare(
+    'INSERT INTO players (surname, name, sex, tournamentId) VALUES (?, ?, ?, ?)'
+  ).run(player.surname, player.name, player.sex, player.tournamentId)
+  return { id: result.lastInsertRowid }
+})
+
+ipcMain.handle('player:update', async (_event, id: number, player: { surname: string; name: string; sex: string }) => {
+  const db = getDb()
+  db.prepare('UPDATE players SET surname = ?, name = ?, sex = ? WHERE id = ?')
+    .run(player.surname, player.name, player.sex, id)
+  return { success: true }
+})
+
+ipcMain.handle('player:delete', async (_event, id: number) => {
+  const db = getDb()
+  // Delete related games
+  db.prepare('DELETE FROM games WHERE whitePlayerId = ? OR blackPlayerId = ?').run(id, id)
+  db.prepare('DELETE FROM players WHERE id = ?').run(id)
+  return { success: true }
+})
+
+// Game operations
+ipcMain.handle('game:getAll', async (_event, tournamentId: number) => {
+  const db = getDb()
+  return db.prepare(`
+    SELECT g.*, 
+           wp.surname as whiteSurname, wp.name as whiteName,
+           bp.surname as blackSurname, bp.name as blackName
+    FROM games g
+    JOIN players wp ON g.whitePlayerId = wp.id
+    LEFT JOIN players bp ON g.blackPlayerId = bp.id
+    WHERE wp.tournamentId = ?
+    ORDER BY g.date DESC, g.id DESC
+  `).all(tournamentId)
+})
+
+ipcMain.handle('game:create', async (_event, game: { whitePlayerId: number; blackPlayerId?: number; date: string }) => {
+  const db = getDb()
+  const result = db.prepare(
+    'INSERT INTO games (whitePlayerId, blackPlayerId, result, date) VALUES (?, ?, 0, ?)'
+  ).run(game.whitePlayerId, game.blackPlayerId || null, game.date)
+  return { id: result.lastInsertRowid }
+})
+
+ipcMain.handle('game:updateResult', async (_event, id: number, result: number) => {
+  const db = getDb()
+  db.prepare('UPDATE games SET result = ? WHERE id = ?').run(result, id)
+  return { success: true }
+})
+
+ipcMain.handle('game:delete', async (_event, id: number) => {
+  const db = getDb()
+  db.prepare('DELETE FROM games WHERE id = ?').run(id)
+  return { success: true }
+})
+
+// Get tournament stats
+ipcMain.handle('tournament:getStats', async (_event, tournamentId: number) => {
+  const db = getDb()
+  
+  const players = db.prepare('SELECT COUNT(*) as count FROM players WHERE tournamentId = ?').get(tournamentId) as { count: number }
+  const games = db.prepare(`
+    SELECT COUNT(*) as count FROM games g
+    JOIN players p ON g.whitePlayerId = p.id
+    WHERE p.tournamentId = ?
+  `).get(tournamentId) as { count: number }
+  
+  return {
+    playerCount: players.count,
+    gameCount: games.count
+  }
+})
+
+// Pairing engine
+ipcMain.handle('game:createPairings', async (_event, tournamentId: number) => {
+  const db = getDb()
+  
+  // Get all players for this tournament
+  const players = db.prepare('SELECT id FROM players WHERE tournamentId = ?').all(tournamentId) as { id: number }[]
+  
+  // Get all games for this tournament
+  const games = db.prepare(`
+    SELECT g.* FROM games g
+    JOIN players p ON g.whitePlayerId = p.id
+    WHERE p.tournamentId = ?
+  `).all(tournamentId) as Array<{ id: number; whitePlayerId: number; blackPlayerId: number; result: number }>
+  
+  // Calculate scores and stats for each player
+  const playerStats = players.map(p => {
+    let score = 0
+    let gamesPlayed = 0
+    let whiteGames = 0
+    const opponents: number[] = []
+    
+    games.forEach(game => {
+      if (game.whitePlayerId === p.id) {
+        gamesPlayed++
+        whiteGames++
+        if (game.blackPlayerId) opponents.push(game.blackPlayerId)
+        if (game.result === 1) score += 1 // White wins
+        if (game.result === 2) score += 0.5 // Draw
+      } else if (game.blackPlayerId === p.id) {
+        gamesPlayed++
+        opponents.push(game.whitePlayerId)
+        if (game.result === 3) score += 1 // Black wins
+        if (game.result === 2) score += 0.5 // Draw
+      }
+    })
+    
+    return {
+      id: p.id,
+      score,
+      gamesPlayed,
+      whiteGames,
+      opponents,
+      averageScore: gamesPlayed > 0 ? score / gamesPlayed : 0
+    }
+  })
+  
+  // Sort by score (descending), then by games played (ascending)
+  playerStats.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score
+    return a.gamesPlayed - b.gamesPlayed
+  })
+  
+  // Shuffle players with same score/games to add randomness
+  const shuffledStats = [...playerStats]
+  for (let i = 0; i < shuffledStats.length - 1; i++) {
+    for (let j = i + 1; j < shuffledStats.length; j++) {
+      if (shuffledStats[i].score === shuffledStats[j].score && 
+          shuffledStats[i].gamesPlayed === shuffledStats[j].gamesPlayed) {
+        if (Math.random() > 0.5) {
+          [shuffledStats[i], shuffledStats[j]] = [shuffledStats[j], shuffledStats[i]]
+        }
+      }
+    }
+  }
+  
+  // Create pairings
+  const availablePlayers = [...shuffledStats]
+  const newGames: Array<{ whitePlayerId: number; blackPlayerId: number }> = []
+  
+  while (availablePlayers.length >= 2) {
+    const player1 = availablePlayers[0]
+    let paired = false
+    
+    for (let i = 1; i < availablePlayers.length; i++) {
+      const player2 = availablePlayers[i]
+      
+      // Check if they haven't played before
+      if (!player1.opponents.includes(player2.id)) {
+        // Determine colors based on white game count
+        let whiteId, blackId
+        if (player1.whiteGames <= player2.whiteGames) {
+          whiteId = player1.id
+          blackId = player2.id
+        } else {
+          whiteId = player2.id
+          blackId = player1.id
+        }
+        
+        newGames.push({ whitePlayerId: whiteId, blackPlayerId: blackId })
+        
+        availablePlayers.splice(i, 1)
+        availablePlayers.splice(0, 1)
+        paired = true
+        break
+      }
+    }
+    
+    if (!paired) {
+      // No opponent found, give bye
+      newGames.push({ whitePlayerId: player1.id, blackPlayerId: 0 })
+      availablePlayers.splice(0, 1)
+    }
+  }
+  
+  // Handle last unpaired player
+  if (availablePlayers.length === 1) {
+    newGames.push({ whitePlayerId: availablePlayers[0].id, blackPlayerId: 0 })
+  }
+  
+  // Insert new games
+  const today = new Date().toISOString().split('T')[0]
+  const insert = db.prepare('INSERT INTO games (whitePlayerId, blackPlayerId, result, date) VALUES (?, ?, 0, ?)')
+  
+  for (const game of newGames) {
+    insert.run(game.whitePlayerId, game.blackPlayerId || null, today)
+  }
+  
+  return { success: true, pairingsCreated: newGames.length }
+})
