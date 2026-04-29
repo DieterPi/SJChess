@@ -92,9 +92,10 @@ ipcMain.handle('tournament:create', async (_event, name: string | { name: string
   } else {
     tname = name as string
   }
+  // Gebruik een placeholder voor de datum, niet datetime('now') direct in de query
   const result = await executeRun(
-    "INSERT INTO tournaments (name, date, type, active) VALUES (?, datetime('now'), ?, 0)",
-    [tname, ttype]
+    "INSERT INTO tournaments (name, date, type, active) VALUES (?, ?, ?, 0)",
+    [tname, new Date().toISOString().split('T')[0], ttype]
   )
   return { id: result.lastInsertRowid }
 })
