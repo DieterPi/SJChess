@@ -11,8 +11,13 @@ export function Players() {
 
   const loadPlayers = async () => {
     if (!activeTournament) return
-    const data = await window.electronAPI.player.getAll(activeTournament.id)
-    setPlayers(data)
+    const data = await window.electronAPI.player.getAllWithScore(activeTournament.id)
+    // Sorteer op score (aflopend) en dan op games gespeeld
+    const sorted = [...data].sort((a: any, b: any) => {
+      if (b.score !== a.score) return b.score - a.score
+      return a.gamesPlayed - b.gamesPlayed
+    })
+    setPlayers(sorted)
   }
 
   useEffect(() => {
@@ -59,18 +64,25 @@ export function Players() {
           <table className="table">
             <thead>
               <tr>
+                <th>#</th>
                 <th>Achternaam</th>
                 <th>Voornaam</th>
                 <th>Geslacht</th>
+                <th>Score</th>
                 <th className="text-right">Acties</th>
               </tr>
             </thead>
             <tbody>
-              {players.map((player) => (
+              {players.map((player: any, index: number) => (
                 <tr key={player.id}>
+                  <td className="font-medium text-gray-500">{index + 1}</td>
                   <td>{player.surname}</td>
                   <td>{player.name}</td>
                   <td>{player.sex === 'M' ? 'Man' : 'Vrouw'}</td>
+                  <td>
+                    <span className="font-medium">{player.score}</span>
+                    <span className="text-gray-500">/{player.gamesPlayed}</span>
+                  </td>
                   <td className="text-right">
                     <button
                       onClick={() => setEditingPlayer(player)}

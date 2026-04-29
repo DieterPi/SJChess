@@ -2,6 +2,7 @@ export interface Tournament {
   id: number
   name: string
   date: string
+  type?: 'standaard' | 'doorgeefschaak'
   ts: string
   active: boolean
 }

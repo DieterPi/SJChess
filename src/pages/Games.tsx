@@ -20,7 +20,8 @@ export function Games() {
 
   const loadPlayers = async () => {
     if (!activeTournament) return
-    const data = await window.electronAPI.player.getAll(activeTournament.id)
+    // Haal spelers op met score
+    const data = await window.electronAPI.player.getAllWithScore(activeTournament.id)
     setPlayers(data)
     // Keep existing selection or select all if empty
     if (selectedPlayers.size === 0) {
@@ -49,18 +50,19 @@ export function Games() {
 
   const handleCreatePairings = async () => {
     if (!activeTournament) return
-    
     if (selectedPlayers.size === 0) {
       alert('Selecteer minstens één speler om te pairen')
       return
     }
-    
     setLoading(true)
     try {
+      // Geef het type van het tornooi mee als derde argument
       const result = await window.electronAPI.game.createPairings(
         activeTournament.id,
-        Array.from(selectedPlayers)
+        Array.from(selectedPlayers),
+        activeTournament.type || 'standaard'
       )
+      //console.log(result)
       alert(`${result.pairingsCreated} nieuwe paringen aangemaakt!`)
       loadGames()
       setShowPlayerSelection(false)
@@ -122,12 +124,17 @@ export function Games() {
     )
   }
 
+  // Groepeer op timestamp tot op de minuut nauwkeurig
   const groupedByDate = games.reduce((acc, game) => {
-    const date = game.date
-    if (!acc[date]) acc[date] = []
-    acc[date].push(game)
+    // Gebruik ts voor groepering tot op de minuut (YYYY-MM-DD HH:MM)
+    const minute = game.ts ? game.ts.substring(0, 16) : game.date
+    if (!acc[minute]) acc[minute] = []
+    acc[minute].unshift(game)
     return acc
   }, {} as Record<string, Game[]>)
+
+  // Sorteer op timestamp (nieuwste eerst)
+  const sortedDates = Object.entries(groupedByDate).sort((a, b) => b[0].localeCompare(a[0]))
 
   return (
     <div>
@@ -174,7 +181,9 @@ export function Games() {
             </div>
 
             <div className="space-y-2 mb-6">
-              {players.map((player) => (
+              {players
+                .sort((a: any, b: any) => b.score - a.score || a.gamesPlayed - b.gamesPlayed)
+                .map((player: any) => (
                 <label
                   key={player.id}
                   className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${
@@ -189,8 +198,14 @@ export function Games() {
                     onChange={() => togglePlayer(player.id)}
                     className="w-4 h-4 text-primary-600"
                   />
-                  <span className="ml-3 font-medium">
+                  <span className="ml-3 font-medium flex-1">
                     {player.surname} {player.name}
+                  </span>
+                  <span className="text-sm text-gray-600 mr-4">
+                    ({player.score}/{player.gamesPlayed})
+                  </span>
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                    #{players.sort((a: any, b: any) => b.score - a.score).findIndex((p: any) => p.id === player.id) + 1}
                   </span>
                 </label>
               ))}
@@ -304,71 +319,190 @@ export function Games() {
           <p className="text-gray-600">Nog geen partijen. Klik op "Nieuwe ronde pairen" om te beginnen.</p>
         </div>
       ) : (
-        Object.entries(groupedByDate).sort((a, b) => b[0].localeCompare(a[0])).map(([date, dateGames]) => (
-          <div key={date} className="mb-8">
-            <h2 className="text-xl font-semibold mb-4">
-              {new Date(date).toLocaleDateString('nl-BE', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
-              })}
-            </h2>
-            
-            <div className="card">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Wit</th>
-                    <th>Zwart</th>
-                    <th>Resultaat</th>
-                    <th className="text-right">Acties</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dateGames.map((game) => (
-                    <tr key={game.id}>
-                      <td className="font-medium">
-                        {game.whiteSurname} {game.whiteName}
-                      </td>
-                      <td className="font-medium">
-                        {game.blackPlayerId ? (
-                          `${game.blackSurname} ${game.blackName}`
-                        ) : (
-                          <span className="text-gray-500 italic">Bye</span>
-                        )}
-                      </td>
-                      <td>
-                        {game.blackPlayerId ? (
-                          <select
-                            className="input py-1 text-sm"
-                            value={game.result}
-                            onChange={(e) => handleUpdateResult(game.id, Number(e.target.value) as GameResult)}
-                          >
-                            <option value={0}>Nog te spelen</option>
-                            <option value={1}>1-0 (Wit wint)</option>
-                            <option value={2}>½-½ (Remise)</option>
-                            <option value={3}>0-1 (Zwart wint)</option>
-                          </select>
-                        ) : (
-                          <span className="text-orange-600 font-medium">½-½ (Bye - 0.5 punt)</span>
-                        )}
-                      </td>
-                      <td className="text-right">
-                        <button
-                          onClick={() => handleDelete(game.id)}
-                          className="btn-danger btn-sm"
-                        >
-                          <Trash2 className="w-3 h-3 inline" />
-                        </button>
-                      </td>
+        sortedDates.map(([date, dateGames]) => {
+          // Detecteer doorgeefschaakmodus op basis van het tornooi-type
+          const isTeamMode = activeTournament?.type === 'doorgeefschaak' && dateGames.length > 1 && dateGames.every(g => g.blackPlayerId)
+          let teamRows = []
+          if (isTeamMode) {
+            // Groepeer per 2 (aannemende dat paring engine games per team maakt)
+            for (let i = 0; i < dateGames.length; i += 2) {
+              const g1 = dateGames[i]
+              const g2 = dateGames[i + 1]
+              // console.log(dateGames)
+              teamRows.push({
+                id: `${g1.id}-${g2.id}`,
+                // Team A: g1.white (wit) + g2.black (zwart) - speler van g1 is wit, speler van g2 is zwart
+                // Team B: g1.black (zwart) + g2.white (wit) - speler van g1 is zwart, speler van g2 is wit
+                teamA: [
+                  { name: g1.whiteName + ' ' + g1.whiteSurname, color: 'wit' },
+                  { name: g2.blackName + ' ' + g2.blackSurname, color: 'zwart' }
+                ],
+                teamB: [
+                  { name: g1.blackName + ' ' + g1.blackSurname, color: 'zwart' },
+                  { name: g2.whiteName + ' ' + g2.whiteSurname, color: 'wit' }
+                ],
+                games: [g1, g2]
+              })
+            }
+          }
+          return (
+            <div key={date} className="mb-8">
+              <h2 className="text-xl font-semibold mb-4">
+                {new Date(date).toLocaleDateString('nl-BE', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </h2>
+              <div className="card">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      {isTeamMode ? (
+                        <>
+                          <th>Team A</th>
+                          <th>Team B</th>
+                          <th>Resultaat (per partij)</th>
+                          <th className="text-right">Acties</th>
+                        </>
+                      ) : (
+                        <>
+                          <th>Wit</th>
+                          <th>Zwart</th>
+                          <th>Resultaat</th>
+                          <th className="text-right">Acties</th>
+                        </>
+                      )}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {isTeamMode ? (
+                      teamRows.map((row) => {
+                        // Bepaal teamresultaat op basis van de games
+                        const g1 = row.games[0], g2 = row.games[1]
+                        let teamResult: 'pending' | 'win' | 'draw' | 'loss' = 'pending'
+                        if (g1.result !== 0 && g2.result !== 0) {
+                          const teamAScore = (g1.result === 1 ? 1 : g1.result === 2 ? 0.5 : 0) + (g2.result === 3 ? 1 : g2.result === 2 ? 0.5 : 0)
+                          const teamBScore = (g1.result === 3 ? 1 : g1.result === 2 ? 0.5 : 0) + (g2.result === 1 ? 1 : g2.result === 2 ? 0.5 : 0)
+                          if (teamAScore > teamBScore) teamResult = 'win'
+                          else if (teamAScore < teamBScore) teamResult = 'loss'
+                          else teamResult = 'draw'
+                        }
+                        
+                        const handleTeamResult = async (result: 'win' | 'draw' | 'loss') => {
+                          // Geef de twee game IDs door en het teamresultaat
+                          await window.electronAPI.game.updateTeamResult(g1.id, g2.id, result)
+                          loadGames()
+                        }
+                        
+                        const getSymbol = (color: string) => color === 'wit' ? '□' : '■'
+                        
+                        return (
+                        <tr key={row.id}>
+                          <td className="font-medium">
+                            {getSymbol(row.teamA[0].color)} {row.teamA[0].name}<br />
+                            {getSymbol(row.teamA[1].color)} {row.teamA[1].name}
+                          </td>
+                          <td className="font-medium">
+                            {getSymbol(row.teamB[0].color)} {row.teamB[0].name}<br />
+                            {getSymbol(row.teamB[1].color)} {row.teamB[1].name}
+                          </td>
+                          <td>
+                            <div className="flex gap-1">
+                              <button
+                                className={`px-2 py-1 text-xs rounded ${teamResult === 'win' ? 'bg-green-600 text-white' : 'bg-gray-200 hover:bg-green-100'}`}
+                                onClick={() => handleTeamResult('win')}
+                                title="Team A wint"
+                              >
+                                A wint
+                              </button>
+                              <button
+                                className={`px-2 py-1 text-xs rounded ${teamResult === 'draw' ? 'bg-yellow-500 text-white' : 'bg-gray-200 hover:bg-yellow-100'}`}
+                                onClick={() => handleTeamResult('draw')}
+                                title="Remise"
+                              >
+                                Remise
+                              </button>
+                              <button
+                                className={`px-2 py-1 text-xs rounded ${teamResult === 'loss' ? 'bg-red-600 text-white' : 'bg-gray-200 hover:bg-red-100'}`}
+                                onClick={() => handleTeamResult('loss')}
+                                title="Team B wint"
+                              >
+                                B wint
+                              </button>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {g1.result !== 0 || g2.result !== 0 ? (
+                                <>Partij 1: {g1.result === 1 ? '1-0' : g1.result === 2 ? '½-½' : g1.result === 3 ? '0-1' : '-'} | Partij 2: {g2.result === 1 ? '1-0' : g2.result === 2 ? '½-½' : g2.result === 3 ? '0-1' : '-'}</>
+                              ) : (
+                                'Nog te spelen'
+                              )}
+                            </div>
+                          </td>
+                          <td className="text-right">
+                            <button
+                              onClick={() => {
+                                if (window.confirm('Weet je zeker dat je beide partijen wilt verwijderen?')) {
+                                  row.games.forEach((game) => handleDelete(game.id))
+                                }
+                              }}
+                              className="btn-danger btn-sm"
+                            >
+                              <Trash2 className="w-3 h-3 inline" />
+                            </button>
+                          </td>
+                        </tr>
+                        )
+                      })
+                    ) : (
+                      dateGames.map((game) => (
+                        <tr key={game.id}>
+                          <td className="font-medium">
+                            {game.whiteSurname} {game.whiteName}
+                          </td>
+                          <td className="font-medium">
+                            {game.blackPlayerId ? (
+                              `${game.blackSurname} ${game.blackName}`
+                            ) : (
+                              <span className="text-gray-500 italic">Bye</span>
+                            )}
+                          </td>
+                          <td>
+                            {game.blackPlayerId ? (
+                              <select
+                                className="input py-1 text-sm"
+                                value={game.result}
+                                onChange={(e) => handleUpdateResult(game.id, Number(e.target.value) as GameResult)}
+                              >
+                                <option value={0}>Nog te spelen</option>
+                                <option value={1}>1-0 (Wit wint)</option>
+                                <option value={2}>½-½ (Remise)</option>
+                                <option value={3}>0-1 (Zwart wint)</option>
+                              </select>
+                            ) : (
+                              <span className="text-orange-600 font-medium">½-½ (Bye - 0.5 punt)</span>
+                            )}
+                          </td>
+                          <td className="text-right">
+                            <button
+                              onClick={() => handleDelete(game.id)}
+                              className="btn-danger btn-sm"
+                            >
+                              <Trash2 className="w-3 h-3 inline" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        ))
+          )
+        })
       )}
     </div>
   )

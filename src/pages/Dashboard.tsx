@@ -6,6 +6,7 @@ import type { TournamentStats } from '../types'
 export function Dashboard() {
   const { tournaments, activeTournament, createTournament, setActive, deleteTournament } = useTournament()
   const [newTournamentName, setNewTournamentName] = useState('')
+  const [newTournamentType, setNewTournamentType] = useState<'standaard' | 'doorgeefschaak'>('standaard')
   const [stats, setStats] = useState<TournamentStats | null>(null)
 
   useEffect(() => {
@@ -19,8 +20,9 @@ export function Dashboard() {
   const handleCreateTournament = async (e: React.FormEvent) => {
     e.preventDefault()
     if (newTournamentName.trim()) {
-      await createTournament(newTournamentName.trim())
+      await createTournament({ name: newTournamentName.trim(), type: newTournamentType })
       setNewTournamentName('')
+      setNewTournamentType('standaard')
     }
   }
 
@@ -116,7 +118,17 @@ export function Dashboard() {
               onChange={(e) => setNewTournamentName(e.target.value)}
             />
           </div>
-          
+          <div className="mb-4">
+            <label className="label">Soort tornooi</label>
+            <select
+              className="input"
+              value={newTournamentType}
+              onChange={e => setNewTournamentType(e.target.value as 'standaard' | 'doorgeefschaak')}
+            >
+              <option value="standaard">Standaard (Swiss)</option>
+              <option value="doorgeefschaak">Doorgeefschaak (teamparen)</option>
+            </select>
+          </div>
           <button type="submit" className="btn-success">
             <Plus className="w-4 h-4 inline mr-2" />
             Toevoegen

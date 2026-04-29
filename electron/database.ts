@@ -79,6 +79,7 @@ function createTables(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name VARCHAR(128) NOT NULL,
       date DATE NOT NULL,
+      type VARCHAR(32) DEFAULT 'standaard',
       ts DATETIME DEFAULT CURRENT_TIMESTAMP,
       active BOOLEAN DEFAULT 0
     );

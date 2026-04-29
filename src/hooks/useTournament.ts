@@ -25,8 +25,8 @@ export function useTournament() {
     loadTournaments()
   }, [loadTournaments])
 
-  const createTournament = async (name: string) => {
-    const result = await window.electronAPI.tournament.create(name)
+  const createTournament = async (data: string | { name: string; type?: string }) => {
+    const result = await window.electronAPI.tournament.create(data)
     await loadTournaments()
     return result
   }

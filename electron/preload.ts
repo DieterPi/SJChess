@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Player operations
   player: {
     getAll: (tournamentId: number) => ipcRenderer.invoke('player:getAll', tournamentId),
+    getAllWithScore: (tournamentId: number) => ipcRenderer.invoke('player:getAllWithScore', tournamentId),
     create: (player: { surname: string; name: string; sex: string; tournamentId: number }) => 
       ipcRenderer.invoke('player:create', player),
     update: (id: number, player: { surname: string; name: string; sex: string }) => 
@@ -35,9 +36,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (game: { whitePlayerId: number; blackPlayerId?: number; date: string }) => 
       ipcRenderer.invoke('game:create', game),
     updateResult: (id: number, result: number) => ipcRenderer.invoke('game:updateResult', id, result),
+    updateTeamResult: (gameId1: number, gameId2: number, teamResult: 'win' | 'draw' | 'loss') => 
+      ipcRenderer.invoke('game:updateTeamResult', gameId1, gameId2, teamResult),
     delete: (id: number) => ipcRenderer.invoke('game:delete', id),
-    createPairings: (tournamentId: number, selectedPlayerIds?: number[]) => 
-      ipcRenderer.invoke('game:createPairings', tournamentId, selectedPlayerIds)
+    createPairings: (tournamentId: number, selectedPlayerIds?: number[], mode?: string) => 
+      ipcRenderer.invoke('game:createPairings', tournamentId, selectedPlayerIds, mode)
   }
 })
 
@@ -56,6 +59,7 @@ export type ElectronAPI = {
   }
   player: {
     getAll: (tournamentId: number) => Promise<any[]>
+    getAllWithScore: (tournamentId: number) => Promise<any[]>
     create: (player: any) => Promise<{ id: number }>
     update: (id: number, player: any) => Promise<{ success: boolean }>
     delete: (id: number) => Promise<{ success: boolean }>
@@ -64,7 +68,8 @@ export type ElectronAPI = {
     getAll: (tournamentId: number) => Promise<any[]>
     create: (game: any) => Promise<{ id: number }>
     updateResult: (id: number, result: number) => Promise<{ success: boolean }>
+    updateTeamResult: (gameId1: number, gameId2: number, teamResult: 'win' | 'draw' | 'loss') => Promise<{ success: boolean }>
     delete: (id: number) => Promise<{ success: boolean }>
-    createPairings: (tournamentId: number, selectedPlayerIds?: number[]) => Promise<{ success: boolean; pairingsCreated: number }>
+    createPairings: (tournamentId: number, selectedPlayerIds?: number[], mode?: string) => Promise<{ success: boolean; pairingsCreated: number }>
   }
 }
