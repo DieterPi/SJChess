@@ -1,7 +1,7 @@
 {
   "name": "sjchess",
   "productName": "SJChess Tournament Manager",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Modern chess tournament pairing application for secondary schools",
   "author": {
     "name": "Dieter Vanderfaeillie",
