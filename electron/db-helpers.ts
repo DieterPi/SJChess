@@ -172,20 +172,16 @@ async function executeSupabaseUpdate(client: any, sql: string, params: any[]): P
   try {
     const tableName = extractTableName(sql)
     const { updates, whereField, whereValue } = extractUpdateData(sql, params)
-    
     let query = client.from(tableName).update(updates)
-    
-    if (whereField && whereValue !== undefined) {
+    // Alleen filter toevoegen als WHERE in de query staat
+    if (sql.toLowerCase().includes('where') && whereField && whereValue !== undefined) {
       query = query.eq(whereField, whereValue)
     }
-    
     const { error } = await query
-    
     if (error) {
       console.error('Supabase UPDATE error:', error)
       throw new Error(error.message)
     }
-    
     return {}
   } catch (error: any) {
     console.error('Supabase update error:', error)
@@ -320,7 +316,17 @@ function extractUpdateData(sql: string, params: any[]): { updates: any; whereFie
     sets.forEach((set, i) => {
       const field = set.split('=')[0].trim()
       if (params[i] !== undefined) {
-        updates[field] = params[i]
+        // Detect boolean columns and convert 1/0 to true/false for Supabase
+        if (field === 'active' && (params[i] === 1 || params[i] === 0)) {
+          const dbMode = require('./database').getDbMode();
+          if (dbMode === 'supabase') {
+            updates[field] = params[i] === 1 ? true : false
+          } else {
+            updates[field] = params[i]
+          }
+        } else {
+          updates[field] = params[i]
+        }
       }
     })
   }

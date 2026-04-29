@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { initDatabase, loadConfig, saveConfig } from './database'
+import { initDatabase, loadConfig, saveConfig, getDbMode } from './database'
 import { executeQuery, executeQueryFirst, executeRun } from './db-helpers'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -80,7 +80,9 @@ ipcMain.handle('tournament:getAll', async () => {
 })
 
 ipcMain.handle('tournament:getActive', async () => {
-  return await executeQueryFirst('SELECT * FROM tournaments WHERE active = 1')
+  const dbMode = getDbMode();
+  const activeValue = dbMode === 'supabase' ? true : 1;
+  return await executeQueryFirst('SELECT * FROM tournaments WHERE active = ?', [activeValue])
 })
 
 ipcMain.handle('tournament:create', async (_event, name: string | { name: string; type?: string }) => {
@@ -94,15 +96,21 @@ ipcMain.handle('tournament:create', async (_event, name: string | { name: string
   }
   // Gebruik een placeholder voor de datum, niet datetime('now') direct in de query
   const result = await executeRun(
-    "INSERT INTO tournaments (name, date, type, active) VALUES (?, ?, ?, 0)",
+    "INSERT INTO tournaments (name, date, active, type) VALUES (?, ?, FALSE, ?)",
     [tname, new Date().toISOString().split('T')[0], ttype]
   )
   return { id: result.lastInsertRowid }
 })
 
 ipcMain.handle('tournament:setActive', async (_event, id: number) => {
-  await executeRun('UPDATE tournaments SET active = 0')
-  await executeRun('UPDATE tournaments SET active = 1 WHERE id = ?', [id])
+  const dbMode = getDbMode();
+  if (dbMode === 'supabase') {
+    await executeRun('UPDATE tournaments SET active = ?', [false]);
+    await executeRun('UPDATE tournaments SET active = ? WHERE id = ?', [true, id]);
+  } else {
+    await executeRun('UPDATE tournaments SET active = ?', [0]);
+    await executeRun('UPDATE tournaments SET active = ? WHERE id = ?', [1, id]);
+  }
   return { success: true }
 })
 
