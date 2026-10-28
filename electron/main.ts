@@ -94,10 +94,11 @@ ipcMain.handle('tournament:create', async (_event, name: string | { name: string
   } else {
     tname = name as string
   }
-  // Gebruik een placeholder voor de datum, niet datetime('now') direct in de query
+  // Gebruik placeholders voor alle waarden: de Supabase-vertaling koppelt kolommen en parameters op volgorde
+  const inactiveValue = getDbMode() === 'supabase' ? false : 0;
   const result = await executeRun(
-    "INSERT INTO tournaments (name, date, active, type) VALUES (?, ?, FALSE, ?)",
-    [tname, new Date().toISOString().split('T')[0], ttype]
+    "INSERT INTO tournaments (name, date, active, type) VALUES (?, ?, ?, ?)",
+    [tname, new Date().toISOString().split('T')[0], inactiveValue, ttype]
   )
   return { id: result.lastInsertRowid }
 })
@@ -105,7 +106,8 @@ ipcMain.handle('tournament:create', async (_event, name: string | { name: string
 ipcMain.handle('tournament:setActive', async (_event, id: number) => {
   const dbMode = getDbMode();
   if (dbMode === 'supabase') {
-    await executeRun('UPDATE tournaments SET active = ?', [false]);
+    // Supabase weigert UPDATE zonder filter, dus enkel de actieve toernooien uitzetten
+    await executeRun('UPDATE tournaments SET active = ? WHERE active = ?', [false, true]);
     await executeRun('UPDATE tournaments SET active = ? WHERE id = ?', [true, id]);
   } else {
     await executeRun('UPDATE tournaments SET active = ?', [0]);

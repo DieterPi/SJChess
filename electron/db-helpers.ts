@@ -304,7 +304,7 @@ function extractInsertData(sql: string, params: any[]): any {
 }
 
 function extractUpdateData(sql: string, params: any[]): { updates: any; whereField: string; whereValue: any } {
-  const setMatch = sql.match(/SET\s+(.+?)\s+WHERE/i)
+  const setMatch = sql.match(/SET\s+(.+?)(?:\s+WHERE|\s*$)/i)
   const whereMatch = sql.match(/WHERE\s+(.+?)$/i)
   
   const updates: any = {}
